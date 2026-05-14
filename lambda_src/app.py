@@ -2,11 +2,11 @@
 app.py - AWS Lambda handler for the PDF tagging pipeline.
 
 Trigger: S3 ObjectCreated event on the input bucket.
-Action: Download the PDF to /tmp, run the pipeline, and write a structured
-CSV result back to the results S3 bucket.
+Action: Download the PDF to /tmp, run the pipeline, and write structured
+CSV and JSON results back to the results S3 bucket.
 
 Environment variables:
-    RESULTS_BUCKET - name of the S3 bucket for CSV result files
+    RESULTS_BUCKET - name of the S3 bucket for result files
 """
 
 import logging
@@ -22,7 +22,7 @@ from botocore.exceptions import ClientError
 from classifier import DocumentClassifier
 from generic_field_extractor import extract_generic_fields
 from metadata_extractor import extract_metadata
-from record_formatter import record_to_csv_text
+from record_formatter import record_to_csv_text, record_to_json_text
 from summarizer import summarize
 from text_extractor import extract_text_from_pdf
 
@@ -82,16 +82,25 @@ def _process_one_object(bucket: str, key: str) -> dict:
         }
 
         if RESULTS_BUCKET:
-            sidecar_key = f"results/{record['document_id']}.csv"
+            csv_key = f"results/csv/{record['document_id']}.csv"
             s3.put_object(
                 Bucket=RESULTS_BUCKET,
-                Key=sidecar_key,
+                Key=csv_key,
                 Body=record_to_csv_text(record).encode("utf-8"),
                 ContentType="text/csv",
             )
-            log.info(f"  Wrote CSV sidecar: s3://{RESULTS_BUCKET}/{sidecar_key}")
+            log.info(f"  Wrote CSV sidecar: s3://{RESULTS_BUCKET}/{csv_key}")
+
+            json_key = f"results/json/{record['document_id']}.json"
+            s3.put_object(
+                Bucket=RESULTS_BUCKET,
+                Key=json_key,
+                Body=record_to_json_text(record).encode("utf-8"),
+                ContentType="application/json",
+            )
+            log.info(f"  Wrote JSON sidecar: s3://{RESULTS_BUCKET}/{json_key}")
         else:
-            log.warning("RESULTS_BUCKET is not set; CSV sidecar was not written")
+            log.warning("RESULTS_BUCKET is not set; result sidecars were not written")
 
         elapsed = (time.perf_counter() - start) * 1000
         log.info(f"  Done in {elapsed:.1f} ms")

@@ -1,7 +1,7 @@
 """
 record_formatter.py
 -------------------
-Helpers for turning one processed document record into CSV.
+Helpers for turning one processed document record into CSV and JSON.
 
 Nested fields are JSON-encoded inside CSV cells so the CSV stays easy to
 import while preserving detailed structures such as keyword_matches.
@@ -51,3 +51,7 @@ def record_to_csv_text(record: dict) -> str:
     writer.writeheader()
     writer.writerow({name: _csv_value(record.get(name)) for name in CSV_FIELDNAMES})
     return output.getvalue()
+
+
+def record_to_json_text(record: dict) -> str:
+    return json.dumps(record, indent=2, ensure_ascii=False, default=str)

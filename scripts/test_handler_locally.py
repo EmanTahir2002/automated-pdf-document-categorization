@@ -1,7 +1,7 @@
 """
 test_handler_locally.py — Exercise the Lambda handler without AWS access.
 
-We stub the S3 download (just copy a local PDF instead) and the S3 CSV
+We stub the S3 download (just copy a local PDF instead) and the S3 CSV/JSON
 write. Useful for confirming the 5-stage pipeline still works inside the
 handler shape before deploying.
 
@@ -50,12 +50,17 @@ def main():
         shutil.copy(src, local_path)
     app.s3.download_file = fake_download_file
 
-    # S3 put_object → capture CSV records into a list
+    # S3 put_object → capture CSV and JSON records into lists
     captured_csv_records = []
+    captured_json_records = []
 
     def fake_put_object(**kwargs):
         body = kwargs["Body"].decode("utf-8")
-        captured_csv_records.append(next(csv.DictReader(io.StringIO(body))))
+        key = kwargs["Key"]
+        if key.endswith(".csv"):
+            captured_csv_records.append(next(csv.DictReader(io.StringIO(body))))
+        elif key.endswith(".json"):
+            captured_json_records.append(json.loads(body))
         return {}
 
     app.s3.put_object = MagicMock(side_effect=fake_put_object)
@@ -92,10 +97,17 @@ def main():
         print(view)
 
     # Pass/fail
-    if len(captured_csv_records) == len(pdfs) and not result["failed"]:
+    print(f"\n--- Captured JSON records: {len(captured_json_records)} ---")
+
+    # Pass/fail
+    if (
+        len(captured_csv_records) == len(pdfs)
+        and len(captured_json_records) == len(pdfs)
+        and not result["failed"]
+    ):
         print("\nPASS: all PDFs processed end-to-end through the handler.")
         return 0
-    print("\nFAIL: some PDFs did not produce a CSV record.")
+    print("\nFAIL: some PDFs did not produce both CSV and JSON records.")
     return 1
 
 

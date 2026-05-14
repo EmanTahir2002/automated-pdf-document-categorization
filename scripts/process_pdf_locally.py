@@ -1,7 +1,7 @@
 """
 process_pdf_locally.py
 ----------------------
-Process a local PDF and write the structured result to a CSV file.
+Process a local PDF and write the structured result to CSV and JSON files.
 
 Run from the project root:
     python scripts/process_pdf_locally.py sample_pdfs/invoice_001.pdf
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_src"))
 from classifier import DocumentClassifier  # noqa: E402
 from generic_field_extractor import extract_generic_fields  # noqa: E402
 from metadata_extractor import extract_metadata  # noqa: E402
-from record_formatter import record_to_csv_text  # noqa: E402
+from record_formatter import record_to_csv_text, record_to_json_text  # noqa: E402
 from summarizer import summarize  # noqa: E402
 from text_extractor import extract_text_from_pdf  # noqa: E402
 
@@ -60,7 +60,7 @@ def main() -> int:
     parser.add_argument(
         "--out-dir",
         default="local_results",
-        help="Directory where CSV result files are written",
+        help="Directory where CSV and JSON result files are written",
     )
     args = parser.parse_args()
 
@@ -68,11 +68,16 @@ def main() -> int:
     os.makedirs(args.out_dir, exist_ok=True)
 
     base_name = os.path.splitext(os.path.basename(args.pdf_path))[0]
-    output_path = os.path.join(args.out_dir, f"{base_name}.csv")
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(record_to_csv_text(record))
+    csv_path = os.path.join(args.out_dir, f"{base_name}.csv")
+    json_path = os.path.join(args.out_dir, f"{base_name}.json")
 
-    print(f"Wrote {output_path}")
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write(record_to_csv_text(record))
+    with open(json_path, "w", encoding="utf-8") as f:
+        f.write(record_to_json_text(record))
+
+    print(f"Wrote {csv_path}")
+    print(f"Wrote {json_path}")
     print(f"Category: {record['category']} ({record['confidence']})")
     print(f"Keyword fields: {', '.join(record['keyword_fields'].keys())}")
     return 0

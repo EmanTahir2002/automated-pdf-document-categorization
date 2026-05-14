@@ -2,7 +2,7 @@
 
 Week 03, Task 01 - AWS Internship
 
-This project is a serverless PDF processing pipeline for digitally-native PDFs. It extracts selectable text from uploaded PDF files, identifies the business category, extracts useful metadata and normalized keyword fields, generates a short summary, and saves the final structured output as a CSV file.
+This project is a serverless PDF processing pipeline for digitally-native PDFs. It extracts selectable text from uploaded PDF files, identifies the business category, extracts useful metadata and normalized keyword fields, generates a short summary, and saves the final structured output as both CSV and JSON files.
 
 The pipeline can run in two ways:
 
@@ -25,7 +25,8 @@ These are the AWS resources used for this deployment:
 | Lambda handler | `app.lambda_handler` |
 | Lambda role | `pdf-pipeline-process-pdf-role-dpyuatwn` |
 | IAM policy | `pdf-pipeline-s3-access` |
-| Output folder | `results/` inside the results bucket |
+| CSV output folder | `results/csv/` inside the results bucket |
+| JSON output folder | `results/json/` inside the results bucket |
 
 AWS flow:
 
@@ -42,17 +43,18 @@ Lambda function: pdf-pipeline-process-pdf
 PDF text extraction, classification, field extraction, summarization
         |
         v
-CSV written to pdf-pipeline-results-eman/results/
+CSV written to pdf-pipeline-results-eman/results/csv/
+JSON written to pdf-pipeline-results-eman/results/json/
         |
         v
 CloudWatch logs record the execution
 ```
 
-The Lambda zip is stored in the results bucket under `deployment/` because Lambda can load deployment packages from S3. The actual generated CSV outputs are stored separately under `results/`.
+The Lambda zip is stored in the results bucket under `deployment/` because Lambda can load deployment packages from S3. The actual generated document outputs are stored separately under `results/csv/` and `results/json/`.
 
 ## Why This Architecture
 
-S3 is used because it is simple, cheap, and event-driven. When a PDF is uploaded to the input bucket, S3 automatically triggers Lambda. Lambda is used because the PDF processing task is short-lived and does not require a running server. The results are saved as CSV in another S3 bucket so they can be downloaded, opened in Excel, or imported into another system later. The input and output buckets are separate to avoid recursive triggers, where Lambda output could accidentally trigger itself again.
+S3 is used because it is simple, cheap, and event-driven. When a PDF is uploaded to the input bucket, S3 automatically triggers Lambda. Lambda is used because the PDF processing task is short-lived and does not require a running server. The results are saved as CSV for spreadsheet/import use and JSON for clean nested structured data. The input and output buckets are separate to avoid recursive triggers, where Lambda output could accidentally trigger itself again.
 
 ## Local Pipeline
 
@@ -67,6 +69,7 @@ PDF file
   -> summarizer.py
   -> record_formatter.py
   -> local_results/<pdf-name>.csv
+  -> local_results/<pdf-name>.json
 ```
 
 ### 1. Text Extraction
@@ -142,9 +145,9 @@ The pipeline stores:
 
 `lambda_src/summarizer.py` creates a short local extractive summary. It does not call any paid AI service.
 
-### 6. CSV Formatting
+### 6. CSV and JSON Formatting
 
-`lambda_src/record_formatter.py` creates the final CSV row. Nested fields like `metadata`, `keyword_fields`, and `keyword_matches` are stored as JSON strings inside CSV cells. This keeps the file easy to open while preserving structured data.
+`lambda_src/record_formatter.py` creates both output formats. The CSV output is useful for opening in Excel or importing into tabular systems. Nested fields like `metadata`, `keyword_fields`, and `keyword_matches` are stored as JSON strings inside CSV cells. The JSON output preserves the same record as clean nested structured data.
 
 ## Repository Structure
 
@@ -198,6 +201,7 @@ Expected output:
 
 ```text
 local_results/test.csv
+local_results/test.json
 ```
 
 Run the full local handler simulation:
@@ -267,7 +271,7 @@ s3://pdf-pipeline-results-eman/deployment/lambda-package.zip
 7. Created/used execution role `pdf-pipeline-process-pdf-role-dpyuatwn`.
 8. Added inline IAM policy `pdf-pipeline-s3-access`.
 9. Gave Lambda permission to read PDFs from the input bucket.
-10. Gave Lambda permission to write CSV files to `results/` in the results bucket.
+10. Gave Lambda permission to write CSV and JSON files to `results/` in the results bucket.
 11. Added environment variable:
 
 ```text
@@ -276,15 +280,21 @@ RESULTS_BUCKET=pdf-pipeline-results-eman
 
 12. Added an S3 trigger on `pdf-pipeline-input-eman` for `.pdf` uploads.
 13. Uploaded `test.pdf` to the input bucket.
-14. Verified that Lambda generated a CSV file in:
+14. Verified that Lambda generated output files in:
 
 ```text
-pdf-pipeline-results-eman/results/
+pdf-pipeline-results-eman/results/csv/
+pdf-pipeline-results-eman/results/json/
 ```
 
-## Output CSV
+## Output Files
 
-Each PDF produces one CSV row with columns such as:
+Each PDF produces:
+
+- one CSV file in `results/csv/`
+- one JSON file in `results/json/`
+
+The CSV file has one row with columns such as:
 
 - `document_id`
 - `filename`
@@ -307,10 +317,12 @@ Each PDF produces one CSV row with columns such as:
 - `category_structural_scores`
 - `processed_at`
 
+The JSON file contains the same record with nested dictionaries and lists preserved naturally.
+
 Example result from AWS:
 
 ```text
-test.pdf -> Invoice -> CSV saved in results bucket
+test.pdf -> Invoice -> CSV and JSON saved in results bucket
 ```
 
 ## Notes and Limitations
@@ -320,6 +332,7 @@ test.pdf -> Invoice -> CSV saved in results bucket
 - The classifier is explainable and local, not a black-box model.
 - TF-IDF here is implemented locally without `scikit-learn` to keep the Lambda package small.
 - CSV output stores nested structures as JSON strings inside cells.
+- JSON output stores nested structures directly.
 - The current version stores results in S3 only.
 
 ## Git Push Steps
