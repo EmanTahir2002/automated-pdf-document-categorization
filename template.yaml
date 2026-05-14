@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Automated PDF tagging pipeline.
+  S3 ObjectCreated -> Lambda -> S3 CSV results.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: pdf-pipeline
+    Description: Used as a prefix for all resource names.
+
+  InputBucketName:
+    Type: String
+    Default: ""
+    Description: Name of the S3 bucket that receives uploaded PDFs.
+
+  ResultsBucketName:
+    Type: String
+    Default: ""
+    Description: Name of the S3 bucket where Lambda writes CSV results.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 512
+    Timeout: 60
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Conditions:
+  UseProvidedInputBucketName: !Not [!Equals [!Ref InputBucketName, ""]]
+  UseProvidedResultsBucketName: !Not [!Equals [!Ref ResultsBucketName, ""]]
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - UseProvidedInputBucketName
+        - !Ref InputBucketName
+        - !Sub "${ProjectName}-input-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireRawPdfs
+            Status: Enabled
+            ExpirationInDays: 90
+
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - UseProvidedResultsBucketName
+        - !Ref ResultsBucketName
+        - !Sub "${ProjectName}-results-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ProcessPdfFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-process-pdf"
+      CodeUri: lambda_src/
+      Handler: app.lambda_handler
+      Description: Extract, classify, summarize, and write CSV results for PDFs uploaded to S3.
+      Environment:
+        Variables:
+          RESULTS_BUCKET: !Ref ResultsBucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !If
+              - UseProvidedInputBucketName
+              - !Ref InputBucketName
+              - !Sub "${ProjectName}-input-${AWS::AccountId}-${AWS::Region}"
+        - S3WritePolicy:
+            BucketName: !If
+              - UseProvidedResultsBucketName
+              - !Ref ResultsBucketName
+              - !Sub "${ProjectName}-results-${AWS::AccountId}-${AWS::Region}"
+      Events:
+        PdfUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref InputBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .pdf
+
+  ProcessPdfLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-process-pdf"
+      RetentionInDays: 14
+
+Outputs:
+  InputBucketName:
+    Description: Upload PDFs here. Trigger fires on every .pdf object.
+    Value: !Ref InputBucket
+
+  ResultsBucketName:
+    Description: CSV result files for each processed document.
+    Value: !Ref ResultsBucket
+
+  LambdaFunctionName:
+    Description: The Lambda function processing PDFs.
+    Value: !Ref ProcessPdfFunction
+
+  LambdaLogGroup:
+    Description: CloudWatch log group for the Lambda function.
+    Value: !Ref ProcessPdfLogGroup
+
+  UploadCommand:
+    Description: Quick test upload command.
+    Value: !Sub "aws s3 cp my-doc.pdf s3://${InputBucket}/"
